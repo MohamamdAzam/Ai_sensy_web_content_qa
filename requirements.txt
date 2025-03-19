@@ -3,4 +3,5 @@ beautifulsoup4
 requests
 transformers
 torch
-pytorch
+flask-cors
+
