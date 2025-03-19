@@ -1,36 +1,80 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from content_handler import ingest_content, answer_question, summarize_content
-import os
+from scraper import scrape_url
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import spacy
+import numpy as np
+import requests
+import re
 
 app = Flask(__name__)
 CORS(app)
 
-content_storage = {}
+
+nlp = spacy.load("en_core_web_sm")
+vectorizer = TfidfVectorizer(stop_words='english')
+text_chunks = []
+tfidf_matrix = None
+
+def chunk_text(text, max_words=200):
+    words = re.findall(r'\b\w+\b', text)
+    return [' '.join(words[i:i+max_words]) for i in range(0, len(words), max_words)]
 
 @app.route('/ingest', methods=['POST'])
-def ingest():
-    urls = request.json.get("urls", [])
-    content_storage.update(ingest_content(urls))
-    return jsonify({"message": "Content ingested successfully!"})
+def ingest_url():
+    global tfidf_matrix
+    data = request.json
+    urls = data.get('urls', [])
+    
+    for url in urls:
+        text = scrape_url(url)
+        if text:
+            chunks = chunk_text(text)
+            text_chunks.extend(chunks)
+    
+    if text_chunks:
+        tfidf_matrix = vectorizer.fit_transform(text_chunks)
+    
+    return jsonify({"message": f"Processed {len(urls)} URLs, {len(text_chunks)} chunks stored"})
+
 
 @app.route('/ask', methods=['POST'])
-def ask():
-    question = request.json.get("question")
-    if not content_storage:
-        return jsonify({"error": "No content available. Please ingest URLs first."})
+def answer_question():
+    data = request.json
+    question = data.get('question', '')
     
-    answer = answer_question(content_storage, question)
-    return jsonify({"answer": answer})
-
-@app.route('/summarize', methods=['GET'])
-def summarize():
-    if not content_storage:
-        return jsonify({"error": "No content available to summarize."})
+    if not text_chunks:
+        return jsonify({"answer": "No content available. Please ingest URLs first."})
     
-    summary = summarize_content(content_storage)
-    return jsonify({"summary": summary})
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    question_vec = vectorizer.transform([question])
+    similarities = cosine_similarity(question_vec, tfidf_matrix)
+    top_indices = np.argsort(similarities[0])[-3:][::-1]
+    context = ' '.join([text_chunks[i] for i in top_indices])
+
+    doc = nlp(context)
+    question_doc = nlp(question.lower())
+
+    answer = ""
+    for sent in doc.sents:
+        sent_text = sent.text
+        if any([
+            'is a' in sent_text.lower(),
+            'is an' in sent_text.lower(),
+            'refers to' in sent_text.lower(),
+            'is designed' in sent_text.lower()
+        ]) and any(token.text in sent_text for token in question_doc if token.pos_ in ['NOUN', 'PROPN']):
+            answer = sent_text
+            break
+
+    if not answer:
+        sentences = [sent.text for sent in doc.sents]
+        sentence_vectors = vectorizer.transform(sentences)
+        sentence_similarities = cosine_similarity(question_vec, sentence_vectors)
+        answer = sentences[np.argmax(sentence_similarities)]
+    
+    return jsonify({"answer": answer.strip()})
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
