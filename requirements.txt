@@ -1,8 +1,11 @@
 flask
-beautifulsoup4
+flask_cors
 requests
-transformers
-torch
-flask-cors
+beautifulsoup4
+scikit-learn 
+sentence-transformers==2.2.2 
+transformers==4.30.1 
+numpy
+spacy
 gunicorn
-
+en_core_web_sm@https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.0/en_core_web_sm-3.7.0-py3-none-any.whl
