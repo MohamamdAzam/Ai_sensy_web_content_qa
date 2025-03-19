@@ -4,5 +4,5 @@ requests
 transformers
 torch
 flask-cors
-uvicorn
+gunicorn
 
